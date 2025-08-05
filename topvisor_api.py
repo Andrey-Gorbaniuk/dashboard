@@ -133,13 +133,12 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
         start_date = datetime.strptime(date_from_str, '%Y-%m-%d').date()
         end_date = datetime.strptime(date_to_str, '%Y-%m-%d').date()
     except ValueError:
-        logger.error(f"Invalid date format for visibility summary. Expected YYYY-MM-DD. Got from={date_from_str}, to={date_to_str}")
+        logger.error(f"Invalid date format for visibility. Expected YYYY-MM-DD.")
         return []
 
     current_date = start_date
     while current_date <= end_date:
         day_str = current_date.strftime('%Y-%m-%d')
-        logger.info(f"--- Processing visibility for date: {day_str} ---")
 
         for region_id in region_indexes:
             for searcher_id in searcher_ids:
@@ -150,18 +149,15 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
                     "project_id": project_id,
                     "region_index": region_id,
                     "searcher": searcher_id,
-                    "dates": [day_str, day_str], # Запрашиваем только один день
+                    "dates": [day_str, day_str],  # Запрашиваем только один день
                     "show_visibility": True,
                 }
 
-                time.sleep(1) # Задержка между запросами, чтобы не превысить лимиты API
+                time.sleep(1)  # Задержка между запросами
+                result = call_public_api(method_path="positions_2/summary", params_data=params)
 
-                # Используем тот же метод, но с другими параметрами
-                result_per_call = call_public_api(method_path="positions_2/summary", params_data=params)
-
-                if result_per_call and "visibilities" in result_per_call:
-                    visibility_list = result_per_call.get("visibilities", [])
-                    # Так как мы запрашиваем один день, нужный результат должен быть в первом элементе
+                if result and "visibilities" in result:
+                    visibility_list = result.get("visibilities", [])
                     if visibility_list and visibility_list[0] is not None:
                         try:
                             visibility_score = float(visibility_list[0])
@@ -176,8 +172,6 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
                             })
                         except (ValueError, TypeError, IndexError) as e:
                             logger.warning(f"Could not parse visibility '{visibility_list}' for {day_str}. Error: {e}")
-                elif result_per_call:
-                    logger.warning(f"Unexpected result format for visibility on {day_str}: {result_per_call}")
 
         current_date += timedelta(days=1)
 
