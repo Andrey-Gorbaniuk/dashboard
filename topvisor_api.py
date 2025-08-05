@@ -1,9 +1,9 @@
-# topvisor_api.py (ИСПРАВЛЕННАЯ ВЕРСИЯ v4)
+# topvisor_api.py (ФИНАЛЬНАЯ ВЕРСИЯ)
 import requests
 import logging
 import time
 import json
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 import config
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,8 @@ def call_public_api(method_path, params_data):
                'Accept': 'application/json'}
     payload = params_data
 
-    logger.info(f"Attempting Topvisor Public API Call. URL: {full_url}")
+    # Убираем лишний лог, чтобы не засорять вывод
+    # logger.info(f"Attempting Topvisor Public API Call. URL: {full_url}")
     logger.debug(f"Payload (body): {json.dumps(payload, ensure_ascii=False)}")
 
     try:
@@ -59,13 +60,12 @@ def get_positions_history(date_from_str, date_to_str, project_id, region_indexes
     """
     all_positions_data = []
 
-    # Итерируем по каждой поисковой системе отдельно
     for searcher_id in searcher_ids:
         logger.info(f"Fetching positions for searcher ID: {searcher_id}")
         params = {
             "project_id": project_id,
             "regions_indexes": region_indexes,
-            "searchers": [searcher_id],  # Запрашиваем только один поисковик за раз
+            "searchers": [searcher_id],
             "dates": [date_from_str, date_to_str],
             "positions_fields": ["position", "relevant_url"],
             "fields": ["name", "id"],
@@ -75,7 +75,7 @@ def get_positions_history(date_from_str, date_to_str, project_id, region_indexes
         }
 
         result = call_public_api(method_path="positions_2/history", params_data=params)
-        time.sleep(1)  # Задержка между запросами
+        time.sleep(1)
 
         if result and "keywords" in result and isinstance(result["keywords"], list):
             searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
@@ -93,9 +93,7 @@ def get_positions_history(date_from_str, date_to_str, project_id, region_indexes
                         if len(parts) < 3: continue
 
                         report_date = parts[0]
-                        # ID поисковика теперь берем из переменной цикла, а не из ключа
                         region_id = int(parts[2])
-
                         position_val = pos_data.get("position")
 
                         if not isinstance(position_val, (int, str)) or not str(position_val).isdigit():
@@ -104,29 +102,25 @@ def get_positions_history(date_from_str, date_to_str, project_id, region_indexes
                         position = int(position_val)
 
                         all_positions_data.append({
-                            "report_date": report_date,
-                            "keyword": keyword_name,
-                            "search_engine_name": searcher_name,
-                            "search_engine_id": searcher_id,
-                            "region_id": region_id,
-                            "position": position,
+                            "report_date": report_date, "keyword": keyword_name,
+                            "search_engine_name": searcher_name, "search_engine_id": searcher_id,
+                            "region_id": region_id, "position": position,
                             "url": pos_data.get("relevant_url")
                         })
                     except (ValueError, TypeError, IndexError) as e:
-                        logger.warning(
-                            f"Error parsing position data for keyword '{keyword_name}', item '{composite_key}'. Error: {e}. Skipping.")
+                        logger.warning(f"Error parsing position data for '{keyword_name}': {e}. Skipping.")
                         continue
 
     logger.info(f"Processed {len(all_positions_data)} position records for project {project_id}.")
     return all_positions_data
 
+
 def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexes, searcher_ids):
     """
     НАДЕЖНАЯ ВЕРСИЯ.
-    Получает историю видимости, итерируя по дням, чтобы избежать путаницы в данных от API.
+    Получает историю видимости, итерируя по дням.
     """
     from datetime import datetime, timedelta
-
     all_visibility_data = []
 
     try:
@@ -142,18 +136,15 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
 
         for region_id in region_indexes:
             for searcher_id in searcher_ids:
-                logger.info(
-                    f"Requesting visibility for project {project_id}, region {region_id}, searcher {searcher_id}, date {day_str}")
+                # Убираем лишний лог, чтобы не засорять вывод
+                # logger.info(f"Requesting visibility for project {project_id}, region {region_id}, searcher {searcher_id}, date {day_str}")
 
                 params = {
-                    "project_id": project_id,
-                    "region_index": region_id,
-                    "searcher": searcher_id,
-                    "dates": [day_str, day_str],  # Запрашиваем только один день
+                    "project_id": project_id, "region_index": region_id,
+                    "searcher": searcher_id, "dates": [day_str, day_str],
                     "show_visibility": True,
                 }
-
-                time.sleep(1)  # Задержка между запросами
+                time.sleep(1)
                 result = call_public_api(method_path="positions_2/summary", params_data=params)
 
                 if result and "visibilities" in result:
@@ -162,12 +153,9 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
                         try:
                             visibility_score = float(visibility_list[0])
                             searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
-
                             all_visibility_data.append({
-                                "report_date": day_str,
-                                "search_engine_name": searcher_name,
-                                "search_engine_id": searcher_id,
-                                "region_id": region_id,
+                                "report_date": day_str, "search_engine_name": searcher_name,
+                                "search_engine_id": searcher_id, "region_id": region_id,
                                 "visibility_score": visibility_score
                             })
                         except (ValueError, TypeError, IndexError) as e:

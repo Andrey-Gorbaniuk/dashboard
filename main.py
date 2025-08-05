@@ -9,17 +9,39 @@ import db_manager
 import metrika_api
 import topvisor_api
 
-# (Настройка логирования остается без изменений)
+
+# =================================================================
+# ОБНОВЛЕННЫЙ БЛОК НАСТРОЙКИ ЛОГИРОВАНИЯ
+# =================================================================
+
 log_level = config.LOG_LEVEL.upper() if config.LOG_LEVEL else 'INFO'
+
+# Создаем папку для логов, если ее нет
+import os
+log_dir = os.path.dirname(config.LOG_FILE)
+if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+# Настраиваем базовый конфигуратор
 logging.basicConfig(
     level=log_level,
-    format='%(asctime)s - %(levelname)s - %(name)s - %(module)s - %(funcName)s - %(lineno)d - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(name)s - %(funcName)s - %(lineno)d - %(message)s',
     handlers=[
-        logging.StreamHandler()
+        logging.StreamHandler(),  # Вывод в консоль (docker logs)
+        logging.FileHandler(config.LOG_FILE, encoding='utf-8') # Вывод в файл
     ]
 )
+
+# Устанавливаем "тихий" режим для слишком "болтливых" библиотек
+logging.getLogger("requests").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+# Получаем наш основной логгер
 logger = logging.getLogger(__name__)
 
+# =================================================================
+# КОНЕЦ ОБНОВЛЕННОГО БЛОКА
+# =================================================================
 
 # Все функции fetch_and_store_* остаются без изменений
 
