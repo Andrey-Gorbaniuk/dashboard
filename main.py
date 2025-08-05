@@ -91,13 +91,56 @@ def fetch_and_store_conversions_data(date_from, date_to):
 def fetch_and_store_topvisor_positions(date_from, date_to):
     """Получает историю позиций из Топвизора и сохраняет их в БД."""
     logger.info(f"Starting to fetch Topvisor positions from {date_from} to {date_to}.")
-    # ... (код функции остается без изменений)
+    positions_data_list_of_dicts = topvisor_api.get_positions_history(
+        date_from_str=date_from,
+        date_to_str=date_to,
+        project_id=config.TOPVISOR_PROJECT_ID,
+        region_indexes=config.TOPVISOR_REGION_INDEXES,
+        searcher_ids=config.TOPVISOR_SEARCHERS
+    )
+
+    if not positions_data_list_of_dicts:
+        logger.warning(f"No positions data received from Topvisor API for period {date_from} - {date_to}.")
+        return
+
+    columns_for_db = ['report_date', 'keyword', 'search_engine_name', 'search_engine_id', 'region_id', 'position', 'url']
+    data_to_insert_tuples = [tuple(d.get(col) for col in columns_for_db) for d in positions_data_list_of_dicts]
+
+    if not data_to_insert_tuples:
+        logger.info("No data (positions) to insert into database after transformation.")
+        return
+
+    logger.info(f"Attempting to insert {len(data_to_insert_tuples)} records (positions) into topvisor_positions.")
+    db_manager.bulk_insert_data('topvisor_positions', columns_for_db, data_to_insert_tuples)
+    logger.info(f"Finished fetching and storing Topvisor positions data for {date_from} - {date_to}.")
 
 
 def fetch_and_store_topvisor_visibility(date_from, date_to):
     """Получает историю видимости из Топвизора и сохраняет ее в БД."""
     logger.info(f"Starting to fetch Topvisor visibility from {date_from} to {date_to}.")
-    # ... (код функции остается без изменений)
+    visibility_data_list_of_dicts = topvisor_api.get_visibility_summary(
+        date_from_str=date_from,
+        date_to_str=date_to,
+        project_id=config.TOPVISOR_PROJECT_ID,
+        region_indexes=config.TOPVISOR_REGION_INDEXES,
+        searcher_ids=config.TOPVISOR_SEARCHERS
+    )
+
+    if not visibility_data_list_of_dicts:
+        logger.warning(f"No visibility data received from Topvisor API for period {date_from} - {date_to}.")
+        return
+
+    # Важно! В get_visibility_summary нет region_name, поэтому исключаем его
+    columns_for_db = ['report_date', 'search_engine_name', 'search_engine_id', 'region_id', 'visibility_score']
+    data_to_insert_tuples = [tuple(d.get(col) for col in columns_for_db) for d in visibility_data_list_of_dicts]
+
+    if not data_to_insert_tuples:
+        logger.info("No data (visibility) to insert into database after transformation.")
+        return
+
+    logger.info(f"Attempting to insert {len(data_to_insert_tuples)} records (visibility) into topvisor_visibility.")
+    db_manager.bulk_insert_data('topvisor_visibility', columns_for_db, data_to_insert_tuples)
+    logger.info(f"Finished fetching and storing Topvisor visibility data for {date_from} - {date_to}.")
 
 
 # ================== НОВЫЙ БЛОК: ФУНКЦИЯ-ЗАДАЧА ДЛЯ ПЛАНИРОВЩИКА ==================
