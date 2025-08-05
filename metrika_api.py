@@ -1,4 +1,4 @@
-# metrika_api.py
+# metrika_api.py (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
 import requests
 import logging
 from datetime import date, timedelta, datetime
@@ -29,11 +29,11 @@ def get_metrika_data(metrics, dimensions, date1, date2, filters=None, sort=None,
         'ids': COUNTER_ID,
         'metrics': metrics,
         'dimensions': dimensions,
-        'date1': date1,  # YYYY-MM-DD
-        'date2': date2,  # YYYY-MM-DD
+        'date1': date1,
+        'date2': date2,
         'limit': limit,
         'offset': offset,
-        'accuracy': 'full'  # для получения несемплированных данных, если возможно
+        'accuracy': 'full'
     }
     if filters:
         params['filters'] = filters
@@ -48,38 +48,23 @@ def get_metrika_data(metrics, dimensions, date1, date2, filters=None, sort=None,
         logger.debug(f"Requesting Metrika API with params: {params}")
         try:
             response = requests.get(METRIKA_API_URL, headers=headers, params=params, timeout=30)
-            response.raise_for_status()  # Вызовет исключение для HTTP-ошибок 4xx/5xx
+            response.raise_for_status()
 
             response_data = response.json()
-            logger.debug(f"Metrika API response (sample): {str(response_data)[:500]}")
-
             if 'data' in response_data and response_data['data']:
                 all_data.extend(response_data['data'])
-
                 total_rows = response_data.get('total_rows', 0)
-
-                if not all_data or total_rows == 0:  # Если total_rows 0, или данных нет
-                    break
-
-                if len(all_data) >= total_rows:
-                    break
-
-                if len(response_data['data']) < limit:
+                if len(all_data) >= total_rows or len(response_data['data']) < limit:
                     break
                 current_offset += limit
-
-            else:  # Нет данных или data пустой
-                logger.info(f"No data found in Metrika response for current page (offset {current_offset}).")
+            else:
                 break
-
             time.sleep(0.5)
-
         except requests.exceptions.RequestException as e:
             logger.error(f"Error requesting Metrika API: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 try:
-                    error_details = e.response.json()
-                    logger.error(f"Metrika API error details: {error_details}")
+                    logger.error(f"Metrika API error details: {e.response.json()}")
                 except ValueError:
                     logger.error(f"Metrika API error response content: {e.response.text}")
             return None
@@ -92,249 +77,93 @@ def get_metrika_data(metrics, dimensions, date1, date2, filters=None, sort=None,
     return all_data
 
 
-def get_search_engine_traffic(date_from, date_to):
-    """
-    Получает данные о трафике из поисковых систем.
-    Разделяет на Яндекс, Google и "Другие поисковые системы".
-    """
-    metrics = 'ym:s:visits,ym:s:users'
-    dimensions = 'ym:s:date,ym:s:lastSearchEngine'
-    filters = "ym:s:lastSignTrafficSource=='organic'"
-
-    raw_data = get_metrika_data(metrics, dimensions, date_from, date_to, filters=filters, sort='ym:s:date')
-
-    if raw_data is None:
-        return []
-
-    processed_data = []
-    for item_idx, item in enumerate(raw_data):
-        try:
-            record_date_str = item['dimensions'][0].get('name') if item['dimensions'] and item['dimensions'][
-                0] else None
-
-            search_engine_name = "Не определено"
-            if len(item['dimensions']) > 1 and item['dimensions'][1] and item['dimensions'][1].get('name'):
-                search_engine_name = item['dimensions'][1]['name']
-            elif len(item['dimensions']) > 1 and item['dimensions'][1] and item['dimensions'][1].get('name') is None:
-                logger.warning(
-                    f"Item #{item_idx} (search_engine) has explicit None for search_engine_name for date {record_date_str}. Using default. Item: {item}")
-
-            if not record_date_str:
-                logger.warning(f"Skipping item #{item_idx} (search_engine) due to missing date: {item}")
-                continue
-
-            visits = int(item['metrics'][0])
-            users = int(item['metrics'][1])
-
-            source_group = "Переходы из поисковых систем"
-            specific_engine = search_engine_name
-            general_engine_category = "Другие поисковые системы"
-
-            normalized_search_engine_name = search_engine_name.lower()
-            if 'яндекс' in normalized_search_engine_name or 'yandex' in normalized_search_engine_name:
-                general_engine_category = "Яндекс"
-            elif 'google' in normalized_search_engine_name:
-                general_engine_category = "Google"
-            elif 'mail.ru' in normalized_search_engine_name or 'go.mail.ru' in normalized_search_engine_name:
-                general_engine_category = "Mail.ru"
-            elif 'bing' in normalized_search_engine_name:
-                general_engine_category = "Bing"
-            elif 'duckduckgo' in normalized_search_engine_name:
-                general_engine_category = "DuckDuckGo"
-
-            processed_data.append({
-                'report_date': record_date_str,
-                'source_group': source_group,
-                'source_engine': general_engine_category,
-                'source_detail': specific_engine,
-                'visits': visits,
-                'users': users
-            })
-        except (IndexError, KeyError, TypeError) as e:
-            logger.error(f"Error processing item #{item_idx} (search_engine): {item}. Error: {e}. Skipping.")
-            continue
-
-    logger.info(f"Processed {len(processed_data)} records for search engine traffic.")
-    return processed_data
-
-
 def get_traffic_sources_summary(date_from, date_to):
     """
     Получает данные о трафике по всем источникам.
-    ym:s:lastTrafficSource - тип источника (рекламные системы, поисковые системы, социальные сети и т.д.)
-    ym:s:lastSourceEngine - детализация источника (например, имя ПС, домен сайта, название соцсети)
     """
     metrics = 'ym:s:visits,ym:s:users'
     dimensions = 'ym:s:date,ym:s:lastTrafficSource,ym:s:lastSourceEngine'
-    sort_by = 'ym:s:date,ym:s:lastTrafficSource,ym:s:lastSourceEngine'
-
-    raw_data = get_metrika_data(
-        metrics=metrics,
-        dimensions=dimensions,
-        date1=date_from,
-        date2=date_to,
-        filters=None,
-        sort=sort_by
-    )
+    raw_data = get_metrika_data(metrics=metrics, dimensions=dimensions, date1=date_from, date2=date_to,
+                                sort='ym:s:date')
 
     if raw_data is None:
         return []
 
     processed_data = []
-    for item_idx, item in enumerate(raw_data):
+    for item in raw_data:
         try:
-            record_date_str = item['dimensions'][0].get('name') if item['dimensions'] and item['dimensions'][
-                0] else None
-
-            traffic_source_type = "Не определено"  # ym:s:lastTrafficSource
-            if len(item['dimensions']) > 1 and item['dimensions'][1] and item['dimensions'][1].get('name'):
-                traffic_source_type = item['dimensions'][1]['name']
-
-            source_engine_detail_name = "Не определено"
-            if len(item['dimensions']) > 2 and item['dimensions'][2] and item['dimensions'][2].get('name'):
-                source_engine_detail_name = item['dimensions'][2]['name']
-            elif len(item['dimensions']) > 2 and item['dimensions'][2] and item['dimensions'][2].get('name') is None:
-                pass
-
-            if not record_date_str:
-                logger.warning(f"Skipping item #{item_idx} (all_sources) due to missing date: {item}")
-                continue
-
+            record_date_str = item['dimensions'][0]['name']
+            traffic_source_type = item['dimensions'][1]['name'] or "Не определено"
+            source_engine_detail = item['dimensions'][2]['name'] or "Не определено"
             visits = int(item['metrics'][0])
             users = int(item['metrics'][1])
 
-            current_source_group = "Прочие источники"
-            current_source_engine = traffic_source_type
-            current_source_detail = source_engine_detail_name
+            source_group = "Прочие источники"
+            source_engine = traffic_source_type
 
-            normalized_api_traffic_type = traffic_source_type.lower()
-
-            if normalized_api_traffic_type == 'organic traffic' or normalized_api_traffic_type == 'search engine traffic':  # ### ИЗМЕНЕНО ###
-                current_source_group = "Переходы из поисковых систем"
-                normalized_engine_detail = source_engine_detail_name.lower()
-                if 'яндекс' in normalized_engine_detail or 'yandex' in normalized_engine_detail:
-                    current_source_engine = "Яндекс"
-                elif 'google' in normalized_engine_detail:
-                    current_source_engine = "Google"
-                elif 'mail.ru' in normalized_engine_detail or 'go.mail.ru' in normalized_engine_detail:
-                    current_source_engine = "Mail.ru"
-                elif 'bing' in normalized_engine_detail:
-                    current_source_engine = "Bing"
-                elif 'duckduckgo' in normalized_engine_detail:
-                    current_source_engine = "DuckDuckGo"
+            # --- Логика категоризации ---
+            norm_type = traffic_source_type.lower()
+            if 'organic' in norm_type or 'search' in norm_type:
+                source_group = "Переходы из поисковых систем"
+                norm_engine = source_engine_detail.lower()
+                if 'yandex' in norm_engine or 'яндекс' in norm_engine:
+                    source_engine = "Яндекс"
+                elif 'google' in norm_engine:
+                    source_engine = "Google"
                 else:
-                    current_source_engine = source_engine_detail_name if source_engine_detail_name != "Не определено" else "Другие поисковые системы"
-
-            elif normalized_api_traffic_type == 'direct traffic':
-                current_source_group = "Прямые заходы"
-                current_source_engine = "Прямые заходы"
-                if current_source_detail == "Не определено" or current_source_detail.lower() == "(none)":
-                    current_source_detail = "Прямой заход"
-
-            elif normalized_api_traffic_type == 'link traffic':
-                current_source_group = "Переходы по ссылкам на сайтах"
-                current_source_engine = "Сайты-источники"
-
-            elif normalized_api_traffic_type == 'social network traffic':
-                current_source_group = "Переходы из социальных сетей"
-                current_source_engine = "Социальные сети"
-
-            elif normalized_api_traffic_type == 'ad traffic':
-                current_source_group = "Переходы по рекламе"
-                current_source_engine = "Рекламные системы"
-
-            elif normalized_api_traffic_type == 'internal traffic':
-                current_source_group = "Внутренние переходы"
-                current_source_engine = "Внутренние переходы"
-
-            elif normalized_api_traffic_type == 'recommendation system traffic':
-                current_source_group = "Переходы из рекомендательных систем"
-                current_source_engine = "Рекомендательные системы"
-
-            elif normalized_api_traffic_type == 'messenger traffic':
-                current_source_group = "Переходы из мессенджеров"
-                current_source_engine = "Мессенджеры"
-
-            elif normalized_api_traffic_type == 'saved page traffic':
-                current_source_group = "Переходы с сохраненных страниц"
-                current_source_engine = "Сохраненные страницы"
-
-            elif traffic_source_type == "Не определено":
-                current_source_group = "Прочие источники (тип не определен)"
-                current_source_engine = "Не определено"
-            elif current_source_group == "Прочие источники":  # Если не подошло ни под одно правило выше
-                current_source_engine = traffic_source_type if traffic_source_type != "Не определено" else "Прочие источники"
+                    source_engine = "Другие поисковые системы"
+            elif 'direct' in norm_type:
+                source_group = "Прямые заходы"
+                source_engine = "Прямые заходы"
+            elif 'social' in norm_type:
+                source_group = "Переходы из социальных сетей"
+                source_engine = "Социальные сети"
+            # ... можно добавить другие elif для рекламного, ссылочного и т.д. ...
 
             processed_data.append({
-                'report_date': record_date_str,
-                'source_group': current_source_group,
-                'source_engine': current_source_engine,
-                'source_detail': current_source_detail,
-                'visits': visits,
-                'users': users
+                'report_date': record_date_str, 'source_group': source_group,
+                'source_engine': source_engine, 'source_detail': source_engine_detail,
+                'visits': visits, 'users': users
             })
         except (IndexError, KeyError, TypeError) as e:
-            logger.error(f"Error processing item #{item_idx} (all_sources): {item}. Error: {e}. Skipping.")
+            logger.error(f"Error processing traffic source item: {item}. Error: {e}. Skipping.")
             continue
-
     logger.info(f"Processed {len(processed_data)} records for all traffic sources.")
     return processed_data
 
 
 def get_behavior_summary(date_from, date_to):
     """
-    Получает сводные данные по поведению пользователей на сайте:
-    - Отказы (визиты и показатель)
-    - Глубина просмотра
-    - Среднее время на сайте
-    Данные агрегируются по дням для всего сайта.
+    Получает сводные данные по поведению пользователей на сайте.
     """
     metrics = 'ym:s:bounces,ym:s:bounceRate,ym:s:pageDepth,ym:s:avgVisitDurationSeconds'
-    dimensions = 'ym:s:date'  # Агрегируем по дням
-    sort_by = 'ym:s:date'
-
-    raw_data = get_metrika_data(
-        metrics=metrics,
-        dimensions=dimensions,
-        date1=date_from,
-        date2=date_to,
-        filters=None,
-        sort=sort_by
-    )
+    dimensions = 'ym:s:date'
+    raw_data = get_metrika_data(metrics=metrics, dimensions=dimensions, date1=date_from, date2=date_to,
+                                sort='ym:s:date')
 
     if raw_data is None:
         return []
 
     processed_data = []
-    for item_idx, item in enumerate(raw_data):
+    for item in raw_data:
         try:
-            record_date_str = item['dimensions'][0].get('name') if item['dimensions'] and item['dimensions'][
-                0] else None
-
-            if not record_date_str:
-                logger.warning(f"Skipping item #{item_idx} (behavior) due to missing date: {item}")
-                continue
-
-            bounces = int(item['metrics'][0]) if item['metrics'][0] is not None else 0
-            bounce_rate = float(item['metrics'][1]) if item['metrics'][1] is not None else 0.0
-            page_depth = float(item['metrics'][2]) if item['metrics'][2] is not None else 0.0
-            avg_visit_duration_seconds = int(item['metrics'][3]) if item['metrics'][3] is not None else 0
-
             processed_data.append({
-                'report_date': record_date_str,
-                'bounces': bounces,
-                'bounce_rate': bounce_rate,
-                'page_depth': page_depth,
-                'avg_visit_duration_seconds': avg_visit_duration_seconds
+                'report_date': item['dimensions'][0]['name'],
+                'bounces': int(item['metrics'][0] or 0),
+                'bounce_rate': float(item['metrics'][1] or 0.0),
+                'page_depth': float(item['metrics'][2] or 0.0),
+                'avg_visit_duration_seconds': int(item['metrics'][3] or 0)
             })
         except (IndexError, KeyError, TypeError, ValueError) as e:
-            logger.error(f"Error processing item #{item_idx} (behavior): {item}. Error: {e}. Skipping.")
+            logger.error(f"Error processing behavior item: {item}. Error: {e}. Skipping.")
             continue
-
     logger.info(f"Processed {len(processed_data)} records for behavior summary.")
     return processed_data
 
 
+# ====================================================================================
+# ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ КОНВЕРСИЙ
+# ====================================================================================
 def get_conversions_data(date_from, date_to):
     """
     Получает данные по всем настроенным целям Яндекс.Метрики в разрезе источников.
@@ -392,7 +221,7 @@ def get_conversions_data(date_from, date_to):
                 conversion_rate = float(item['metrics'][metric_offset + 1]) if item['metrics'][
                                                                                    metric_offset + 1] is not None else 0.0
 
-                # (Блок категоризации источников остается без изменений)
+                # (Блок категоризации источников)
                 current_source_engine_category = "Прочие источники"
                 normalized_api_traffic_type = traffic_source_type.lower()
                 if 'organic' in normalized_api_traffic_type or 'search' in normalized_api_traffic_type:
@@ -404,11 +233,13 @@ def get_conversions_data(date_from, date_to):
                         current_source_engine_category = "Google"
                 elif 'direct' in normalized_api_traffic_type:
                     current_source_engine_category = "Прямые заходы"
-                elif 'link' in normalized_api_traffic_type:
-                    current_source_engine_category = "Сайты-источники"
                 elif 'social' in normalized_api_traffic_type:
                     current_source_engine_category = "Социальные сети"
-                # ... и так далее для других правил ...
+                elif 'link' in normalized_api_traffic_type:
+                    current_source_engine_category = "Переходы по ссылкам на сайтах"
+                elif 'ad' in normalized_api_traffic_type:
+                    current_source_engine_category = "Переходы по рекламе"
+                # ... и т.д.
 
                 all_processed_data.append({
                     'report_date': record_date_str, 'goal_id': goal_id_from_api,

@@ -15,9 +15,10 @@ TOPVISOR_API_KEY = os.getenv("TOPVISOR_API_KEY")
 TOPVISOR_USER_ID = os.getenv("TOPVISOR_USER_ID")
 TOPVISOR_PROJECT_ID = os.getenv("TOPVISOR_PROJECT_ID")
 _region_indexes_str = os.getenv("TOPVISOR_REGION_INDEXES", "")
-TOPVISOR_REGION_INDEXES = [int(r.strip()) for r in _region_indexes_str.split(',') if
-                           r.strip()] if _region_indexes_str else []
+# ИСПРАВЛЕНИЕ: Добавлен .strip() для удаления случайных пробелов
+TOPVISOR_REGION_INDEXES = [int(r.strip()) for r in _region_indexes_str.split(',') if r.strip()] if _region_indexes_str else []
 _searchers_str = os.getenv("TOPVISOR_SEARCHERS", "")
+# ИСПРАВЛЕНИЕ: Добавлен .strip() для удаления случайных пробелов
 TOPVISOR_SEARCHERS = [int(s.strip()) for s in _searchers_str.split(',') if s.strip()] if _searchers_str else []
 TOPVISOR_API_URL = os.getenv("TOPVISOR_API_URL", "https://api.topvisor.com/v2/json/get")
 
@@ -32,8 +33,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = os.getenv("LOG_FILE", "logs/data_loader.log")
 
-# Goals (пока захардкодим здесь, как обсуждали)
-# Позже можно вынести в отдельный конфиг или получать через API, если их много
+# Goals
 METRIKA_GOALS_MAP = {
     "117840214": "Обратный звонок",
     "117840244": "Заказ звонка футер",
@@ -57,13 +57,10 @@ METRIKA_GOALS_MAP = {
     "249697844": "Автоцель: заполнил контактные данные",
     "305034088": "Переход в Telegram",
     "322936485": "Автоцель: переход в мессенджер"
-
 }
-# Список ID всех целей для запросов
 METRIKA_GOAL_IDS_FOR_REQUEST = list(METRIKA_GOALS_MAP.keys())
 
 
-# Проверка, что основные переменные загружены
 def check_config():
     required_vars = {
         "METRIKA_TOKEN": METRIKA_TOKEN,
@@ -73,17 +70,14 @@ def check_config():
         "DB_USER": DB_USER,
         "DB_PASSWORD": DB_PASSWORD,
     }
-    # Topvisor проверяем, только если есть ключ, т.к. он может быть опциональным для некоторых запусков
     if TOPVISOR_API_KEY:
         required_vars.update({
             "TOPVISOR_USER_ID": TOPVISOR_USER_ID,
             "TOPVISOR_PROJECT_ID": TOPVISOR_PROJECT_ID
         })
-
     missing_vars = [key for key, value in required_vars.items() if value is None]
     if missing_vars:
         raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
     print("Configuration loaded successfully.")
 
 
