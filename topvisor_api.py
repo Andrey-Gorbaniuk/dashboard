@@ -53,69 +53,81 @@ def call_public_api(method_path, params_data):
 
 
 def get_positions_history(date_from_str, date_to_str, project_id, region_indexes, searcher_ids):
+    """
+    НАДЕЖНАЯ ВЕРСИЯ.
+    Корректно обрабатывает ответ API, даже если для некоторых ключевых слов нет данных.
+    """
     all_positions_data = []
 
-    for searcher_id in searcher_ids:
-        logger.info(f"Fetching positions for searcher ID: {searcher_id}")
+    # Мы можем запрашивать все поисковики сразу, чтобы уменьшить число запросов
+    params = {
+        "project_id": project_id,
+        "regions_indexes": region_indexes,
+        "searchers": searcher_ids,
+        "dates": [date_from_str, date_to_str],
+        "positions_fields": ["position", "relevant_url"],
+        "fields": ["name", "id"],
+        "limit": 2000,  # Можно увеличить лимит
+        "offset": 0,
+        "show_all_positions_data_from_date": 1  # Важный параметр, чтобы получить все срезы
+    }
 
-        params = {
-            "project_id": project_id,
-            "regions_indexes": region_indexes,
-            "searchers": [searcher_id],
-            "dates": [date_from_str, date_to_str],
-            "positions_fields": ["position", "relevant_url"],
-            "fields": ["name", "id"],
-            "limit": 1000,
-            "offset": 0,
-            "show_all_positions_data_from_date": 1
-        }
+    logger.info(f"Requesting positions history with params: {json.dumps(params, ensure_ascii=False)}")
+    result = call_public_api(method_path="positions_2/history", params_data=params)
+    time.sleep(1)  # Обязательная задержка после запроса
 
-        result = call_public_api(method_path="positions_2/history", params_data=params)
-        time.sleep(1)
+    if result and "keywords" in result and isinstance(result["keywords"], list):
+        for keyword_data in result["keywords"]:
+            keyword_name = keyword_data.get("name")
+            positions_data = keyword_data.get("positionsData", {})
 
-        if result and "keywords" in result and isinstance(result["keywords"], list):
-            searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
+            # API может вернуть пустой список [], если данных нет.
+            # Мы должны корректно обработать и словарь, и список.
+            if not isinstance(positions_data, dict):
+                # Если это не словарь (например, пустой список), просто пропускаем
+                continue
 
-            for keyword_data in result["keywords"]:
-                keyword_name = keyword_data.get("name")
-                positions_data = keyword_data.get("positionsData", {})
-
-                if not isinstance(positions_data, dict):
-                    logger.warning(
-                        f"Unexpected type for positionsData for keyword '{keyword_name}': {type(positions_data)}. Skipping.")
-                    continue
-
-                for composite_key, pos_data in positions_data.items():
+            for composite_key, pos_data in positions_data.items():
+                try:
+                    # Ключ имеет формат 'YYYY-MM-DD:SEARCHER_ID:REGION_ID'
                     parts = composite_key.split(':')
-                    if len(parts) < 3: continue
+                    if len(parts) < 3:
+                        continue  # Пропускаем некорректные ключи
 
                     report_date = parts[0]
+                    searcher_id = int(parts[1])
                     region_id = int(parts[2])
 
                     position_val = pos_data.get("position")
 
-                    try:
-                        position = int(position_val)
-                        all_positions_data.append({
-                            "report_date": report_date,
-                            "keyword": keyword_name,
-                            "search_engine_name": searcher_name,
-                            "search_engine_id": searcher_id,
-                            "region_id": region_id,
-                            "position": position,
-                            "url": pos_data.get("relevant_url")
-                        })
-                    except (ValueError, TypeError):
+                    # Пропускаем, если позиция не числовая (например, 'x' или None)
+                    if not isinstance(position_val, (int, str)) or not str(position_val).isdigit():
                         continue
+
+                    position = int(position_val)
+                    searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
+
+                    all_positions_data.append({
+                        "report_date": report_date,
+                        "keyword": keyword_name,
+                        "search_engine_name": searcher_name,
+                        "search_engine_id": searcher_id,
+                        "region_id": region_id,
+                        "position": position,
+                        "url": pos_data.get("relevant_url")
+                    })
+                except (ValueError, TypeError, IndexError) as e:
+                    logger.warning(
+                        f"Error parsing position data for keyword '{keyword_name}', item '{composite_key}'. Error: {e}. Skipping.")
+                    continue
 
     logger.info(f"Processed {len(all_positions_data)} position records for project {project_id}.")
     return all_positions_data
 
 def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexes, searcher_ids):
     """
-    ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ ФУНКЦИИ.
-    - Использует правильный метод API: 'positions_2/summary'.
-    - Корректно обрабатывает ответ, беря второй элемент из списка 'visibilities'.
+    НАДЕЖНАЯ ВЕРСИЯ.
+    Получает историю видимости, итерируя по дням, чтобы избежать путаницы в данных от API.
     """
     from datetime import datetime, timedelta
 
@@ -125,7 +137,7 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
         start_date = datetime.strptime(date_from_str, '%Y-%m-%d').date()
         end_date = datetime.strptime(date_to_str, '%Y-%m-%d').date()
     except ValueError:
-        logger.error(f"Invalid date format. Expected YYYY-MM-DD. Got from={date_from_str}, to={date_to_str}")
+        logger.error(f"Invalid date format for visibility summary. Expected YYYY-MM-DD. Got from={date_from_str}, to={date_to_str}")
         return []
 
     current_date = start_date
@@ -138,32 +150,25 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
                 logger.info(
                     f"Requesting visibility for project {project_id}, region {region_id}, searcher {searcher_id}, date {day_str}")
 
-                method_path = "positions_2/summary"
-
                 params = {
                     "project_id": project_id,
                     "region_index": region_id,
                     "searcher": searcher_id,
-                    "dates": [day_str, day_str],
+                    "dates": [day_str, day_str], # Запрашиваем только один день
                     "show_visibility": True,
                 }
 
-                time.sleep(1)
+                time.sleep(1) # Задержка между запросами, чтобы не превысить лимиты API
 
-                result_per_call = call_public_api(method_path=method_path, params_data=params)
-
-                # Диагностическую строку можно убрать или закомментировать
-                # logger.info(f"Full Topvisor Response for {day_str} (region {region_id}, searcher {searcher_id}): {result_per_call}")
+                # Используем тот же метод, но с другими параметрами
+                result_per_call = call_public_api(method_path="positions_2/summary", params_data=params)
 
                 if result_per_call and "visibilities" in result_per_call:
                     visibility_list = result_per_call.get("visibilities", [])
-
-                    # ================ ГЛАВНОЕ ИСПРАВЛЕНИЕ: ПРОВЕРЯЕМ ВТОРОЙ ЭЛЕМЕНТ ================
-                    # Данные находятся в visibility_list[1]
-                    if len(visibility_list) > 1 and visibility_list[1] is not None:
+                    # Так как мы запрашиваем один день, нужный результат должен быть в первом элементе
+                    if visibility_list and visibility_list[0] is not None:
                         try:
-                            # Берем второй элемент
-                            visibility_score = float(visibility_list[1])
+                            visibility_score = float(visibility_list[0])
                             searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
 
                             all_visibility_data.append({
@@ -173,8 +178,8 @@ def get_visibility_summary(date_from_str, date_to_str, project_id, region_indexe
                                 "region_id": region_id,
                                 "visibility_score": visibility_score
                             })
-                        except (ValueError, TypeError, IndexError):
-                            logger.warning(f"Could not parse visibility '{visibility_list}' for {day_str}")
+                        except (ValueError, TypeError, IndexError) as e:
+                            logger.warning(f"Could not parse visibility '{visibility_list}' for {day_str}. Error: {e}")
                 elif result_per_call:
                     logger.warning(f"Unexpected result format for visibility on {day_str}: {result_per_call}")
 
