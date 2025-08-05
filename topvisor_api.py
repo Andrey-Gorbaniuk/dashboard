@@ -55,71 +55,67 @@ def call_public_api(method_path, params_data):
 def get_positions_history(date_from_str, date_to_str, project_id, region_indexes, searcher_ids):
     """
     НАДЕЖНАЯ ВЕРСИЯ.
-    Корректно обрабатывает ответ API, даже если для некоторых ключевых слов нет данных.
+    Итерирует по поисковым системам, чтобы делать более простые и надежные запросы.
     """
     all_positions_data = []
 
-    # Мы можем запрашивать все поисковики сразу, чтобы уменьшить число запросов
-    params = {
-        "project_id": project_id,
-        "regions_indexes": region_indexes,
-        "searchers": searcher_ids,
-        "dates": [date_from_str, date_to_str],
-        "positions_fields": ["position", "relevant_url"],
-        "fields": ["name", "id"],
-        "limit": 2000,  # Можно увеличить лимит
-        "offset": 0,
-        "show_all_positions_data_from_date": 1  # Важный параметр, чтобы получить все срезы
-    }
+    # Итерируем по каждой поисковой системе отдельно
+    for searcher_id in searcher_ids:
+        logger.info(f"Fetching positions for searcher ID: {searcher_id}")
+        params = {
+            "project_id": project_id,
+            "regions_indexes": region_indexes,
+            "searchers": [searcher_id],  # Запрашиваем только один поисковик за раз
+            "dates": [date_from_str, date_to_str],
+            "positions_fields": ["position", "relevant_url"],
+            "fields": ["name", "id"],
+            "limit": 2000,
+            "offset": 0,
+            "show_all_positions_data_from_date": 1
+        }
 
-    logger.info(f"Requesting positions history with params: {json.dumps(params, ensure_ascii=False)}")
-    result = call_public_api(method_path="positions_2/history", params_data=params)
-    time.sleep(1)  # Обязательная задержка после запроса
+        result = call_public_api(method_path="positions_2/history", params_data=params)
+        time.sleep(1)  # Задержка между запросами
 
-    if result and "keywords" in result and isinstance(result["keywords"], list):
-        for keyword_data in result["keywords"]:
-            keyword_name = keyword_data.get("name")
-            positions_data = keyword_data.get("positionsData", {})
+        if result and "keywords" in result and isinstance(result["keywords"], list):
+            searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
 
-            # API может вернуть пустой список [], если данных нет.
-            # Мы должны корректно обработать и словарь, и список.
-            if not isinstance(positions_data, dict):
-                # Если это не словарь (например, пустой список), просто пропускаем
-                continue
+            for keyword_data in result["keywords"]:
+                keyword_name = keyword_data.get("name")
+                positions_data = keyword_data.get("positionsData", {})
 
-            for composite_key, pos_data in positions_data.items():
-                try:
-                    # Ключ имеет формат 'YYYY-MM-DD:SEARCHER_ID:REGION_ID'
-                    parts = composite_key.split(':')
-                    if len(parts) < 3:
-                        continue  # Пропускаем некорректные ключи
-
-                    report_date = parts[0]
-                    searcher_id = int(parts[1])
-                    region_id = int(parts[2])
-
-                    position_val = pos_data.get("position")
-
-                    # Пропускаем, если позиция не числовая (например, 'x' или None)
-                    if not isinstance(position_val, (int, str)) or not str(position_val).isdigit():
-                        continue
-
-                    position = int(position_val)
-                    searcher_name = SEARCHER_MAP.get(searcher_id, f"SearcherID {searcher_id}")
-
-                    all_positions_data.append({
-                        "report_date": report_date,
-                        "keyword": keyword_name,
-                        "search_engine_name": searcher_name,
-                        "search_engine_id": searcher_id,
-                        "region_id": region_id,
-                        "position": position,
-                        "url": pos_data.get("relevant_url")
-                    })
-                except (ValueError, TypeError, IndexError) as e:
-                    logger.warning(
-                        f"Error parsing position data for keyword '{keyword_name}', item '{composite_key}'. Error: {e}. Skipping.")
+                if not isinstance(positions_data, dict):
                     continue
+
+                for composite_key, pos_data in positions_data.items():
+                    try:
+                        parts = composite_key.split(':')
+                        if len(parts) < 3: continue
+
+                        report_date = parts[0]
+                        # ID поисковика теперь берем из переменной цикла, а не из ключа
+                        region_id = int(parts[2])
+
+                        position_val = pos_data.get("position")
+
+                        if not isinstance(position_val, (int, str)) or not str(position_val).isdigit():
+                            continue
+
+                        position = int(position_val)
+
+                        all_positions_data.append({
+                            "report_date": report_date,
+                            "keyword": keyword_name,
+                            "search_engine_name": searcher_name,
+                            "search_engine_id": searcher_id,
+                            "region_id": region_id,
+                            "position": position,
+                            "url": pos_data.get("relevant_url")
+                        })
+                    except (ValueError, TypeError, IndexError) as e:
+                        logger.warning(
+                            f"Error parsing position data for keyword '{keyword_name}', item '{composite_key}'. Error: {e}. Skipping.")
+                        continue
 
     logger.info(f"Processed {len(all_positions_data)} position records for project {project_id}.")
     return all_positions_data
