@@ -1,0 +1,36 @@
+# docker-compose.yml (ФИНАЛЬНАЯ ВЕРСИЯ ДЛЯ СЕРВИСА)
+services:
+  db:
+    image: postgres:15
+    container_name: myproject_postgres_db
+    restart: always # Эта база данных должна работать всегда
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    container_name: myproject_data_loader_app
+    restart: always # ИЗМЕНЕНИЕ: Этот сервис теперь тоже должен работать всегда
+    depends_on:
+      - db
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    volumes:
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    command: >
+      sh -c "
+        wait-for-it.sh db:5432 --timeout=60 --strict -- echo 'PostgreSQL is up - executing command' &&
+        python main.py
+      "
+
+volumes:
+  postgres_data:

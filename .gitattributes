@@ -1,0 +1,13 @@
+# По умолчанию обрабатывать текстовые файлы автоматически
+* text=auto
+
+# Указать, что shell-скрипты (.sh) должны ВСЕГДА использовать LF окончания строк
+*.sh text eol=lf
+
+# Рекомендуется также добавить это для других файлов, чтобы избежать проблем
+*.py text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+.dockerignore text eol=lf
+.gitignore text eol=lf
+requirements.txt text eol=lf

@@ -1,0 +1,23 @@
+# .dockerignore
+
+# Исключаем временные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Исключаем виртуальное окружение
+.venv
+venv/
+env/
+
+# Исключаем файлы IDE
+.idea/
+.vscode/
+
+# Исключаем кэш Docker и другие служебные файлы
+.dockerignore
+.env
+Dockerfile
+docker-compose.yml
+README.md
