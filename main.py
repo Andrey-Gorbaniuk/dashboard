@@ -138,7 +138,42 @@ def run_daily_job():
     logger.info("================== Scheduled daily job finished ==================")
 
 
-# ================== НОВЫЙ БЛОК: ОСНОВНАЯ ЛОГИКА ЗАПУСКА И ПЛАНИРОВАНИЯ ==================
+
+def run_historical_load(days_to_load):
+    """
+    Выполняет разовую загрузку данных за указанное количество прошедших дней.
+    """
+    logger.info(f"================== Starting HISTORICAL data load for the last {days_to_load} days ==================")
+    try:
+        # Устанавливаем даты для сбора исторических данных
+        today = date.today()
+        # Данные всегда доступны до "вчера" включительно
+        date_to = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+        date_from = (today - timedelta(days=days_to_load)).strftime('%Y-%m-%d')
+
+        logger.info(f"Historical data will be fetched for the period: {date_from} to {date_to}")
+
+        # --- Секция Метрики ---
+        if config.METRIKA_TOKEN and config.METRIKA_COUNTER_ID:
+            fetch_and_store_all_traffic_sources(date_from, date_to)
+            fetch_and_store_behavior_data(date_from, date_to)
+            fetch_and_store_conversions_data(date_from, date_to)
+        else:
+            logger.warning("Metrika configuration is incomplete. Skipping Metrika historical load.")
+
+        # --- Секция Топвизора ---
+        if config.TOPVISOR_API_KEY and config.TOPVISOR_PROJECT_ID:
+            fetch_and_store_topvisor_positions(date_from, date_to)
+            fetch_and_store_topvisor_visibility(date_from, date_to)
+        else:
+            logger.warning("Topvisor configuration is incomplete. Skipping Topvisor historical load.")
+
+    except Exception as e:
+        logger.error(f"An error occurred during the historical data load: {e}", exc_info=True)
+
+    logger.info("================== HISTORICAL data load finished ==================")
+
+# ================== ОБНОВЛЕННЫЙ БЛОК: ОСНОВНАЯ ЛОГИКА ЗАПУСКА И ПЛАНИРОВАНИЯ ==================
 if __name__ == '__main__':
     logger.info("Script started as a service.")
 
@@ -151,27 +186,20 @@ if __name__ == '__main__':
     logger.info("Checking and creating database tables if they don't exist...")
     db_manager.create_tables_if_not_exist()
 
-    # Настраиваем расписание: каждый день в 03:00 ночи (можно поменять)
-    # Это время выбрано, чтобы не нагружать системы в рабочее время.
+    # --- ШАГ 1: ИСТОРИЧЕСКАЯ ЗАГРУЗКА ---
+    # Выполняем загрузку данных за последние 30 дней.
+    run_historical_load(days_to_load=30)
+
+    # --- ШАГ 2: ЗАГРУЗКА ЗА ВЧЕРА И ЗАПУСК ПЛАНИРОВЩИКА ---
+    # Запускаем ежедневную задачу сразу, чтобы гарантировать наличие самых свежих (вчерашних) данных
+    logger.info("Running daily job for yesterday to ensure the latest data is present...")
+    run_daily_job()
+
+    # Настраиваем расписание на будущее
     schedule.every().day.at("03:00").do(run_daily_job)
     logger.info(f"Job scheduled to run every day at 03:00. Next run is at: {schedule.next_run}")
-
-    # --- Опционально: Запуск исторических данных при первом старте ---
-    # Если нужно загрузить данные за последние 90 дней при самом первом запуске,
-    # раскомментируйте следующие строки. При последующих перезапусках контейнера
-    # их лучше закомментировать, чтобы не грузить данные повторно.
-
-    # logger.info("Performing initial data load for the last 90 days...")
-    # date_to_hist = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
-    # date_from_hist = (date.today() - timedelta(days=90)).strftime('%Y-%m-%d')
-    # # ... здесь можно вызвать функции сбора с date_from_hist и date_to_hist
-    # logger.info("Initial data load finished.")
-
-    # Запускаем задачу сразу при старте, чтобы не ждать следующего дня
-    logger.info("Running job for the first time immediately...")
-    run_daily_job()
 
     # Основной цикл, который поддерживает работу скрипта
     while True:
         schedule.run_pending()
-        time.sleep(60)  # Проверяем расписание каждую минуту
+        time.sleep(60)
